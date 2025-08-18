@@ -197,6 +197,7 @@ fig = plt.figure()
 ax = fig.add_subplot(111${projection?`, projection='${projection}'`:''})
 ${code}
 `;
+        // set handler before posting to avoid race with worker response
         worker.worker.onmessage = e=>{
           const {ok,token:rt,imgs,err} = e.data;
           if(rt!==token) return;
