@@ -83,7 +83,7 @@ let pyReady = (async () => {
   // 重要：Blob Worker 一定要設定 indexURL，否則部署後會 404
   self.pyodide = await loadPyodide({ indexURL: "https://cdn.jsdelivr.net/pyodide/v0.25.1/full/" });
   await self.pyodide.loadPackage(["numpy", "matplotlib"]);
-  await self.pyodide.runPythonAsync(`
+  await self.pyodide.runPythonAsync(\`
 import matplotlib
 matplotlib.use("agg")
 from matplotlib import rcParams
@@ -146,7 +146,7 @@ def _run(code_str):
         plt.show = _orig_show
     gc.collect()
     return images
-  `);
+  \`);
 })();
 
 self.onmessage = async (e) => {
