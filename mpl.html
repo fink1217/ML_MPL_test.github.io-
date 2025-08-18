@@ -31,6 +31,16 @@
     <script type="text/babel">
       const { useMemo, useState, useEffect, useRef, useContext, createContext, useCallback } = React;
 
+      // 👉 Dev-only error overlay（可移除）
+      (function(){
+        const div = document.createElement('div');
+        div.style.cssText = 'position:fixed;left:8px;bottom:8px;max-width:50vw;z-index:99999;background:#111827;color:#fca5a5;border:1px solid #374151;border-radius:8px;padding:8px 10px;font:12px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;display:none;white-space:pre-wrap;';
+        document.body.appendChild(div);
+        function show(msg){ div.textContent = msg; div.style.display='block'; }
+        window.addEventListener('error', e => show('JS Error: ' + (e.message || e.error)));
+        window.addEventListener('unhandledrejection', e => show('Promise Rejection: ' + (e.reason && (e.reason.message || e.reason)) ));
+      })();
+
       /* ========= 小工具 ========= */
       const slugifyItemName = (name) => name.replace(/\s+/g, '').replace(/\(.*\)/, '').replace(/[^a-zA-Z0-9._]/g, '-');
       const tokensFromName = (name) => { const s = new Set(); const m = name.match(/[a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)*/g); if (m) m.forEach(t=>s.add(t)); if (name.includes('@')) s.add('@'); return Array.from(s); };
