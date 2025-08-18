@@ -17,12 +17,19 @@
   <script type="text/babel">
     const {useState,useEffect,useRef,useContext,createContext,useCallback,useMemo,startTransition,useDeferredValue} = React;
 
-    function parseHash(h){
-      const [section='home',sub='',item=''] = h.replace('#','').split('/');
-      return {section,sub,item};
+    function parseHash(h) {
+      const raw = (h || "").replace(/^#/, "").replace(/^\/+/, "");
+      const parts = raw ? raw.split("/") : [];
+      const section = parts[0] || "home";
+      const sub = parts[1] || "";
+      const item = parts[2] || "";
+      return { section, sub, item };
     }
-    function buildHash({section,sub,item}){
-      return `#${section}${sub?'/'+sub:''}${item?'/'+item:''}`;
+    function buildHash({ section, sub, item }) {
+      const segs = [section || "home"];
+      if (sub) segs.push(sub);
+      if (item) segs.push(item);
+      return "#/" + segs.join("/");
     }
 
     function useHashRouter(){
@@ -70,31 +77,89 @@
       restart(){
         if(this.worker){this.worker.onmessage=null;this.worker.onerror=null;this.worker.terminate();URL.revokeObjectURL(this.url);}
         const src = `
-self.importScripts("https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js");
-let ready = (async()=>{
-  self.pyodide = await loadPyodide();
-  await self.pyodide.loadPackage(["matplotlib"]);
-  await self.pyodide.runPythonAsync("from matplotlib.projections import get_projection_class\n_ = get_projection_class('polar')\n_ = get_projection_class('3d')");
+self.importScripts("https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.js");
+
+let pyReady = (async () => {
+  // 重要：Blob Worker 一定要設定 indexURL，否則部署後會 404
+  self.pyodide = await loadPyodide({ indexURL: "https://cdn.jsdelivr.net/pyodide/v0.25.1/full/" });
+  await self.pyodide.loadPackage(["numpy", "matplotlib"]);
+  await self.pyodide.runPythonAsync(`
+import matplotlib
+matplotlib.use("agg")
+from matplotlib import rcParams
+rcParams['font.family'] = ['DejaVu Sans']
+rcParams['axes.unicode_minus'] = True
+
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64, gc
+
+# 預先註冊投影，避免惰性載入失敗
+try:
+    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+except Exception:
+    pass
+try:
+    from matplotlib.projections import get_projection_class
+    _ = get_projection_class('polar')
+    _ = get_projection_class('3d')
+except Exception:
+    pass
+
+def _encode_fig(fig):
+    bio = io.BytesIO()
+    fig.savefig(bio, format='png', bbox_inches='tight', dpi=96)
+    return "data:image/png;base64," + base64.b64encode(bio.getvalue()).decode()
+
+def _capture(images):
+    try:
+        fignums = list(plt.get_fignums())
+    except Exception:
+        fignums = []
+    for num in fignums[:6]:
+        try:
+            fig = plt.figure(num)
+            images.append(_encode_fig(fig))
+        except Exception:
+            pass
+    if len(fignums) > 6:
+        images.append("TRUNCATED")
+    for num in fignums:
+        try:
+            plt.close(num)
+        except Exception:
+            pass
+
+def _run(code_str):
+    import matplotlib.image as mpimg
+    images = []
+    plt.close('all')
+    _orig_show = plt.show
+    def _show_hook(*args, **kwargs):
+        _capture(images)
+    try:
+        plt.show = _show_hook
+        ns = {}
+        exec(code_str, {'np':np, 'plt':plt, 'mpimg':mpimg}, ns)
+    finally:
+        _capture(images)
+        plt.show = _orig_show
+    gc.collect()
+    return images
+  `);
 })();
-self.onmessage = async e=>{
-  await ready;
-  const {code,token} = e.data;
-  try{
-    await self.pyodide.runPythonAsync(code);
-    let imgs=[];
-    if(self.pyodide.globals.get('plt')){
-      const plt = self.pyodide.globals.get('plt');
-      const figs = plt.get_fignums();
-      for(let i=0;i<figs.length && i<6;i++){
-        const buf = plt.figure(figs[i]).canvas.toDataURL();
-        imgs.push(buf);
-      }
-      if(figs.length>6) imgs.push('TRUNCATED');
-      plt.close('all');
-    }
-    self.postMessage({ok:true,token,imgs});
-  }catch(err){
-    self.postMessage({ok:false,token,err:String(err)});
+
+self.onmessage = async (e) => {
+  const { code, token } = e.data;
+  try {
+    await pyReady;
+    self.pyodide.globals.set("USER_CODE", code);
+    const imgs = await self.pyodide.runPythonAsync("_run(USER_CODE)")
+      .then(res => res.toJs({ create_proxies: false }));
+    self.pyodide.globals.delete("USER_CODE");
+    self.postMessage({ ok: true, token, imgs });
+  } catch (err) {
+    self.postMessage({ ok: false, token, err: String(err && err.message ? err.message : err) });
   }
 };
         `;
@@ -132,7 +197,6 @@ fig = plt.figure()
 ax = fig.add_subplot(111${projection?`, projection='${projection}'`:''})
 ${code}
 `;
-        worker.post({code:src,token});
         worker.worker.onmessage = e=>{
           const {ok,token:rt,imgs,err} = e.data;
           if(rt!==token) return;
@@ -140,6 +204,7 @@ ${code}
           if(ok) setState({running:false,imgs,err:null});
           else setState({running:false,imgs:[],err});
         };
+        worker.post({code:src,token});
       };
       return <div className="mb-6">
         <pre className="bg-zinc-800 p-4 rounded text-sm overflow-auto w-full"><code>{deferred}</code></pre>
