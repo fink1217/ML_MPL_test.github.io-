@@ -1,183 +1,89 @@
 <!doctype html>
 <html lang="zh-Hant">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Matplotlib 懶人包｜穩定版（Worker + 單一執行 + 投影預載）</title>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Matplotlib 懶人包｜Lazy</title>
+  <script>
+    window.tailwind = {config:{safelist:['ring-2','ring-emerald-500','bg-emerald-700','bg-amber-700','bg-zinc-700','hover:bg-zinc-600','border-emerald-600','border-emerald-700/50','bg-emerald-500/10','bg-emerald-500/20','bg-emerald-500/30']}}
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="min-h-screen bg-zinc-950 text-zinc-100">
+  <div id="root"></div>
+  <script type="text/babel">
+    const {useState,useEffect,useRef,useContext,createContext,useCallback,useMemo,startTransition,useDeferredValue} = React;
 
-    <!-- Tailwind（含少量 safelist） -->
-    <script>
-      window.tailwind = {
-        config: {
-          safelist: [
-            'ring-2','ring-emerald-500',
-            'bg-emerald-700','bg-amber-700','bg-zinc-700','hover:bg-zinc-600',
-            'border-emerald-600','border-emerald-700/50',
-            'bg-emerald-500/10','bg-emerald-500/20','bg-emerald-500/30'
-          ]
-        }
-      }
-    </script>
-    <script src="https://cdn.tailwindcss.com"></script>
+    function parseHash(h) {
+      const raw = (h || "").replace(/^#/, "").replace(/^\/+/, "");
+      const parts = raw ? raw.split("/") : [];
+      const section = parts[0] || "home";
+      const sub = parts[1] || "";
+      const item = parts[2] || "";
+      return { section, sub, item };
+    }
+    function buildHash({ section, sub, item }) {
+      const segs = [section || "home"];
+      if (sub) segs.push(sub);
+      if (item) segs.push(item);
+      return "#/" + segs.join("/");
+    }
 
-    <!-- React 18 + Babel -->
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  </head>
-  <body class="min-h-screen bg-zinc-950 text-zinc-100">
-    <div id="root"></div>
-
-    <script type="text/babel">
-      const { useMemo, useState, useEffect, useRef, useContext, createContext, useCallback } = React;
-
-      // 👉 Dev-only error overlay（可移除）
-      (function(){
-        const div = document.createElement('div');
-        div.style.cssText = 'position:fixed;left:8px;bottom:8px;max-width:50vw;z-index:99999;background:#111827;color:#fca5a5;border:1px solid #374151;border-radius:8px;padding:8px 10px;font:12px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;display:none;white-space:pre-wrap;';
-        document.body.appendChild(div);
-        function show(msg){ div.textContent = msg; div.style.display='block'; }
-        window.addEventListener('error', e => show('JS Error: ' + (e.message || e.error)));
-        window.addEventListener('unhandledrejection', e => show('Promise Rejection: ' + (e.reason && (e.reason.message || e.reason)) ));
-      })();
-
-      /* ========= 小工具 ========= */
-      const slugifyItemName = (name) => name.replace(/\s+/g, '').replace(/\(.*\)/, '').replace(/[^a-zA-Z0-9._]/g, '-');
-      const tokensFromName = (name) => { const s = new Set(); const m = name.match(/[a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)*/g); if (m) m.forEach(t=>s.add(t)); if (name.includes('@')) s.add('@'); return Array.from(s); };
-      let _nextCbId = 1; const genCbId = () => `cb-${_nextCbId++}`;
-
-      /* ========= 行內註解：僅顯示與複製，不影響執行 ========= */
-      function explainOne(stmt){
-        const s = stmt.trim();
-        if (!s) return "空行";
-        if (s.startsWith("#")) return "註解";
-        if (/^import numpy as np\b/.test(s)) return "匯入 NumPy 並命名為 np";
-        if (/^import matplotlib\.pyplot as plt\b/.test(s)) return "匯入 Matplotlib 並命名為 plt";
-        if (/^import matplotlib\.image as mpimg\b/.test(s)) return "匯入影像模組 mpimg";
-        if (/^from mpl_toolkits\.mplot3d import /.test(s)) return "啟用 3D 投影（相容舊版）";
-        if (/^\w+\s*=\s*np\.linspace\(/.test(s)) return `建立等間距向量 ${s.split('=')[0].trim()}`;
-        if (/^\w+\s*=\s*np\.meshgrid\(/.test(s)) return "建立網格座標 X, Y";
-        if (/^\w+\s*=\s*np\.sin\(/.test(s)) return "計算正弦";
-        if (/^\w+\s*=\s*np\.cos\(/.test(s)) return "計算餘弦";
-        if (/^\w+\s*=\s*np\.sqrt\(/.test(s)) return "平方根";
-        if (/^np\.random\.seed\(/.test(s)) return "設定隨機種子（可重現）";
-        if (/^\w+\s*=\s*\w+\s*\*\*\s*\d+/.test(s)) return "次方並指派";
-        if (/^plt\.plot\(/.test(s)) return "折線/標記；可含樣式與 label";
-        if (/^plt\.scatter\(/.test(s)) return "散點圖";
-        if (/^plt\.hist\(/.test(s)) return "直方圖";
-        if (/^plt\.imshow\(/.test(s)) return "顯示影像陣列";
-        if (/^plt\.title\(/.test(s)) return "圖表標題";
-        if (/^plt\.xlabel\(/.test(s)) return "x 軸標籤";
-        if (/^plt\.ylabel\(/.test(s)) return "y 軸標籤";
-        if (/^plt\.grid\(/.test(s)) return "顯示格線";
-        if (/^plt\.legend\(/.test(s)) return "顯示圖例";
-        if (/^plt\.yscale\(/.test(s)) return "切換 y 軸比例";
-        if (/^plt\.minorticks_on\(/.test(s)) return "啟用次刻度";
-        if (/^plt\.axis\(/.test(s)) return "視窗範圍/比例";
-        if (/^plt\.savefig\(/.test(s)) return "輸出圖檔";
-        if (/^plt\.show\(\)/.test(s)) return "顯示目前圖形（這裡被攔截以取得影像）";
-        if (/^\w+\s*=\s*plt\.figure\(/.test(s)) return "建立 Figure 物件";
-        if (/^plt\.figure\(/.test(s)) return "建立/切換 Figure";
-        if (/^plt\.subplot2grid\(/.test(s)) return "自訂網格子圖";
-        if (/^fig\.add_subplot\(/.test(s) && /projection=['"]polar['"]/.test(s)) return "在 Figure 上建立極座標 Axes";
-        if (/^fig\.add_subplot\(/.test(s) && /projection=['"]3d['"]/.test(s)) return "在 Figure 上建立 3D Axes";
-        if (/^plt\.subplot\(/.test(s) && /projection='polar'/.test(s)) return "（建議改用 fig.add_subplot(..., projection='polar')）";
-        if (/^plt\.subplot\(/.test(s) && /projection='3d'/.test(s)) return "（建議改用 fig.add_subplot(..., projection='3d')）";
-        if (/^plt\.subplot\(/.test(s)) return "建立/切換子圖";
-        if (/^fig,.*=\s*plt\.subplots\(/.test(s)) return "物件導向：建立 Figure 與 Axes";
-        if (/^ax\d*\.plot_surface\(/.test(s) || /^ax\.plot_surface\(/.test(s)) return "3D 曲面";
-        if (/^ax\d*\.plot\(/.test(s) || /^ax\.plot\(/.test(s)) return "在指定 Axes 上繪線";
-        if (/^ax\.set_xticks\(/.test(s)) return "設定 x 主刻度";
-        if (/^ax\.set_yticks\(/.test(s)) return "設定 y 主刻度";
-        if (/^ax\.set_xticklabels\(/.test(s)) return "設定 x 刻度標籤";
-        if (/^ax\.set_yticklabels\(/.test(s)) return "設定 y 刻度標籤";
-        if (/^ax\.tick_params\(/.test(s)) return "刻度樣式";
-        if (/^plt\.contourf\(/.test(s)) return "等高線填色";
-        if (/^plt\.colorbar\(/.test(s)) return "加入色條";
-        return "一般 Python 指令";
-      }
-      const explainLine = (line) => {
-        const parts = line.split(';').map(p => p.trim()).filter(Boolean);
-        if (parts.length <= 1) return explainOne(line);
-        return parts.map(explainOne).join("；");
+    function useHashRouter(){
+      const [state,setState] = useState(()=>parseHash(location.hash));
+      const lastHash = useRef(location.hash);
+      const writeHash = next => {
+        const h = buildHash(next);
+        if(h===lastHash.current) return;
+        lastHash.current = h;
+        Promise.resolve().then(()=>{location.hash = h;});
       };
-      function annotatePython(code){
-        const lines = code.replace(/\r\n/g,'\n').split('\n');
-        const maxLen = lines.reduce((m, s) => Math.max(m, s.replace(/\s+$/,'').length), 0);
-        const col = Math.max(40, Math.min(88, maxLen + 2));
-        return lines.map(raw => {
-          const line = raw.replace(/\s+$/,'');
-          if (!line.trim()) return raw;
-          const pad = ' '.repeat(Math.max(1, col - line.length));
-          return line + pad + '# ' + explainLine(line);
-        }).join('\n');
-      }
-
-      /* ========= 全域執行管理：單一執行 + 廣播清空 ========= */
-      const RunContext = createContext({
-        register: (id, clearFn) => () => {},
-        start: (id) => ({ runSeq: 0 }),
-        done: (id, seq) => {},
-        evictIfCurrent: (id) => {},
-        getCurrent: () => null,
-      });
-
-      function RunProvider({ children }) {
-        const currentRef = useRef(null);   // { id, seq }
-        const seqRef = useRef(1);
-        const registryRef = useRef(new Map()); // id -> clearFn
-
-        const register = useCallback((id, clearFn) => {
-          registryRef.current.set(id, clearFn);
-          return () => { registryRef.current.delete(id); };
-        }, []);
-
-        const broadcastClearExcept = useCallback((keepId) => {
-          registryRef.current.forEach((fn, id) => {
-            if (id !== keepId) {
-              try { fn(""); } catch (_) {}
-            }
+      useEffect(()=>{
+        const onHash = () => {
+          startTransition(()=>{
+            const next = parseHash(location.hash);
+            lastHash.current = location.hash;
+            setState(next);
           });
-        }, []);
+        };
+        addEventListener('hashchange', onHash);
+        return ()=> removeEventListener('hashchange', onHash);
+      },[]);
+      const setRoute = next => {
+        const merged = {...state,...next};
+        startTransition(()=>setState(merged));
+        writeHash(merged);
+      };
+      return [state,setRoute];
+    }
 
-        const start = useCallback((id) => {
-          broadcastClearExcept(id); // 清掉其他卡片輸出
-          const seq = seqRef.current++;
-          currentRef.current = { id, seq };
-          return { runSeq: seq };
-        }, [broadcastClearExcept]);
+    const RunContext = createContext();
+    function RunProvider({children}){
+      const runEpochRef = useRef(0);
+      const listeners = useRef(new Set());
+      const register = fn => {listeners.current.add(fn);return ()=>listeners.current.delete(fn);};
+      const broadcastClear = keepId => {listeners.current.forEach(fn=>fn(keepId));};
+      const start = id => {runEpochRef.current++;broadcastClear(id);return runEpochRef.current;};
+      const done = (id,epoch) => runEpochRef.current===epoch;
+      const value = {start,done,register};
+      return <RunContext.Provider value={value}>{children}</RunContext.Provider>;
+    }
 
-        const done = useCallback((id, seq) => {
-          const cur = currentRef.current;
-          if (cur && cur.id === id && cur.seq === seq) currentRef.current = null;
-        }, []);
-
-        const evictIfCurrent = useCallback((id) => {
-          const cur = currentRef.current;
-          if (cur && cur.id === id) currentRef.current = null;
-        }, []);
-
-        const getCurrent = useCallback(() => currentRef.current, []);
-
-        const ctx = useMemo(() => ({ register, start, done, evictIfCurrent, getCurrent }), [register, start, done, evictIfCurrent, getCurrent]);
-        return <RunContext.Provider value={ctx}>{children}</RunContext.Provider>;
-      }
-
-      /* ========= Pyodide Worker（預載 polar/3d 投影 + OOP 友善） ========= */
-      function makeWorkerURL(){
+    class PyWorker{
+      constructor(){this.restart();}
+      restart(){
+        if(this.worker){this.worker.onmessage=null;this.worker.onerror=null;this.worker.terminate();URL.revokeObjectURL(this.url);}
         const src = `
-          let ready = false;
-          let pyodide = null;
+self.importScripts("https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.js");
 
-          self.addEventListener('message', async (e) => {
-            const { type, code } = e.data || {};
-            try {
-              if (type === 'init') {
-                if (!pyodide) {
-                  importScripts('https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.js');
-                  pyodide = await loadPyodide({ indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.25.1/full/' });
-                  await pyodide.loadPackage(['numpy','matplotlib']);
-                  await pyodide.runPythonAsync(\`
+let pyReady = (async () => {
+  // 重要：Blob Worker 一定要設定 indexURL，否則部署後會 404
+  self.pyodide = await loadPyodide({ indexURL: "https://cdn.jsdelivr.net/pyodide/v0.25.1/full/" });
+  await self.pyodide.loadPackage(["numpy", "matplotlib"]);
+  await self.pyodide.runPythonAsync(\`
 import matplotlib
 matplotlib.use("agg")
 from matplotlib import rcParams
@@ -188,7 +94,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import io, base64, gc
 
-# ---- 預先註冊投影（避免延遲載入失敗） ----
+# 預先註冊投影，避免惰性載入失敗
 try:
     from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 except Exception:
@@ -205,848 +111,137 @@ def _encode_fig(fig):
     fig.savefig(bio, format='png', bbox_inches='tight', dpi=96)
     return "data:image/png;base64," + base64.b64encode(bio.getvalue()).decode()
 
-def _capture_all_open_figs(images):
+def _capture(images):
     try:
         fignums = list(plt.get_fignums())
     except Exception:
         fignums = []
-    for num in fignums:
+    for num in fignums[:6]:
         try:
             fig = plt.figure(num)
             images.append(_encode_fig(fig))
         except Exception:
             pass
+    if len(fignums) > 6:
+        images.append("TRUNCATED")
     for num in fignums:
         try:
             plt.close(num)
         except Exception:
             pass
 
-def _run_matplotlib_user_code(code: str):
+def _run(code_str):
     import matplotlib.image as mpimg
     images = []
     plt.close('all')
     _orig_show = plt.show
     def _show_hook(*args, **kwargs):
-        _capture_all_open_figs(images)
+        _capture(images)
     try:
         plt.show = _show_hook
         ns = {}
-        exec(code, {'np':np, 'plt':plt, 'mpimg':mpimg}, ns)
+        exec(code_str, {'np':np, 'plt':plt, 'mpimg':mpimg}, ns)
     finally:
-        _capture_all_open_figs(images)
+        _capture(images)
         plt.show = _orig_show
     gc.collect()
     return images
-                  \`);
-                }
-                ready = true;
-                self.postMessage({ type:'ready' });
-              } else if (type === 'run') {
-                if (!ready) { self.postMessage({ type:'error', error:'Python not ready' }); return; }
-                pyodide.globals.set("CODE_TO_RUN", code);
-                await pyodide.runPythonAsync(\`_RET = _run_matplotlib_user_code(CODE_TO_RUN)\`);
-                const images = pyodide.globals.get("_RET").toJs({ create_proxies:false });
-                pyodide.globals.delete("CODE_TO_RUN");
-                pyodide.globals.delete("_RET");
-                self.postMessage({ type:'result', images });
-              }
-            } catch (err) {
-              self.postMessage({ type:'error', error: String(err && err.message ? err.message : err) });
-            }
-          });
+  \`);
+})();
+
+self.onmessage = async (e) => {
+  const { code, token } = e.data;
+  try {
+    await pyReady;
+    self.pyodide.globals.set("USER_CODE", code);
+    const imgs = await self.pyodide.runPythonAsync("_run(USER_CODE)")
+      .then(res => res.toJs({ create_proxies: false }));
+    self.pyodide.globals.delete("USER_CODE");
+    self.postMessage({ ok: true, token, imgs });
+  } catch (err) {
+    self.postMessage({ ok: false, token, err: String(err && err.message ? err.message : err) });
+  }
+};
         `;
-        const blob = new Blob([src], { type:'application/javascript' });
-        return URL.createObjectURL(blob);
+        const blob = new Blob([src],{type:'text/javascript'});
+        this.url = URL.createObjectURL(blob);
+        this.worker = new Worker(this.url);
       }
+      post(data){this.worker.postMessage(data);}  
+    }
 
-      const PyContext = createContext({ ready:false, loading:true, error:null, busy:false, run: async () => { throw new Error('not ready'); } });
+    const workerSingle = {current:null};
+    function useWorker(){
+      if(!workerSingle.current){workerSingle.current = new PyWorker();}
+      useEffect(()=>()=>{
+        const w = workerSingle.current; if(!w) return;
+        w.worker.onmessage=null;w.worker.onerror=null;w.worker.terminate();URL.revokeObjectURL(w.url);workerSingle.current=null;
+      },[]);
+      return workerSingle.current;
+    }
 
-      function PyProvider({ children }) {
-        const [state, setState] = useState({ ready:false, loading:true, error:null, busy:false });
-        const workerRef = useRef(null);
-        const timeoutRef = useRef(null);
-        const queueRef = useRef(Promise.resolve());
-        const runCountRef = useRef(0);
-
-        const initWorker = useCallback(() => {
-          if (workerRef.current) {
-            try { workerRef.current.terminate(); } catch(_) {}
-            workerRef.current = null;
-          }
-          const url = makeWorkerURL();
-          const w = new Worker(url);
-          URL.revokeObjectURL(url);
-          workerRef.current = w;
-
-          w.onmessage = (e) => {
-            const { type } = e.data || {};
-            if (type === 'ready') {
-              setState(s => ({ ...s, ready:true, loading:false, error:null }));
-            } else if (type === 'result') {
-              clearTimeout(timeoutRef.current);
-              setState(s => ({ ...s, busy:false }));
-              if (pendingResolveRef.current) pendingResolveRef.current(e.data.images);
-              pendingResolveRef.current = null;
-            } else if (type === 'error') {
-              clearTimeout(timeoutRef.current);
-              setState(s => ({ ...s, busy:false, error: e.data.error || '執行錯誤' }));
-              if (pendingRejectRef.current) pendingRejectRef.current(new Error(e.data.error || '執行錯誤'));
-              pendingRejectRef.current = null;
-            }
-          };
-          w.onerror = (err) => {
-            clearTimeout(timeoutRef.current);
-            setState(s => ({ ...s, busy:false, error: String(err.message || err) }));
-            if (pendingRejectRef.current) pendingRejectRef.current(new Error(String(err.message || err)));
-            pendingRejectRef.current = null;
-          };
-
-          // 啟動
-          w.postMessage({ type:'init' });
-          setState({ ready:false, loading:true, error:null, busy:false });
-        }, []);
-
-        // 啟動一次
-        useEffect(() => {
-          initWorker();
-          return () => { if (workerRef.current) workerRef.current.terminate(); };
-        }, [initWorker]);
-
-        const TIMEOUT_MS = 12000;
-        const pendingResolveRef = useRef(null);
-        const pendingRejectRef = useRef(null);
-
-        const run = useCallback(async (code) => {
-          // 佇列化（一次只跑一段），並加入逾時保護
-          const task = () => new Promise((resolve, reject) => {
-            if (!workerRef.current) return reject(new Error("Python 引擎不存在"));
-            pendingResolveRef.current = resolve;
-            pendingRejectRef.current = reject;
-            setState(s => ({ ...s, busy:true, error:null }));
-            workerRef.current.postMessage({ type:'run', code });
-            clearTimeout(timeoutRef.current);
-            timeoutRef.current = setTimeout(() => {
-              // 強制重啟 worker
-              try { workerRef.current.terminate(); } catch(_) {}
-              workerRef.current = null;
-              setState(s => ({ ...s, busy:false, ready:false, error: "執行逾時，已重啟 Python 引擎" }));
-              // 立即重建以便下次可用
-              initWorker();
-              reject(new Error("執行逾時，已重啟 Python 引擎"));
-            }, TIMEOUT_MS);
-          });
-
-          const p = queueRef.current.then(task);
-          // 維護佇列尾端（吞掉錯誤，避免鏈斷裂）
-          queueRef.current = p.catch(() => {});
-          const images = await p;
-
-          // 定期重啟：跑了 5 次自動刷新 worker，避免長時使用堆積
-          runCountRef.current = (runCountRef.current + 1) % 5;
-          if (runCountRef.current === 0) {
-            try { workerRef.current.terminate(); } catch(_) {}
-            workerRef.current = null;
-            initWorker();
-          }
-          return images;
-        }, [initWorker]);
-
-        const ctx = useMemo(() => ({ ...state, run }), [state, run]);
-        return <PyContext.Provider value={ctx}>{children}</PyContext.Provider>;
-      }
-
-      /* ========= UI 元件 ========= */
-      function Dropdown({ label, items }) {
-        const [open, setOpen] = useState(false);
-        const ref = useRef(null);
-        useEffect(() => {
-          const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-          document.addEventListener("click", onDoc);
-          return () => document.removeEventListener("click", onDoc);
-        }, []);
-        return (
-          <div className="relative" ref={ref}>
-            <button className="px-3 py-2 rounded-xl hover:bg-zinc-800/60 transition border border-zinc-700" onClick={() => setOpen(v => !v)}>{label}</button>
-            {open && (<div className="absolute mt-2 min-w-56 rounded-xl border border-zinc-700 bg-zinc-900/95 backdrop-blur p-2 shadow-2xl z-50">{items}</div>)}
-          </div>
-        );
-      }
-      function Accordion({ items }) {
-        const [openIdx, setOpenIdx] = useState(null);
-        return (
-          <div className="space-y-3">
-            {items.map((it, i) => (
-              <div key={i} className="rounded-2xl border border-zinc-700 overflow-hidden">
-                <button className="w-full text-left px-4 py-3 bg-zinc-800/60 hover:bg-zinc-800/80" onClick={() => setOpenIdx(openIdx === i ? null : i)}>
-                  <div className="font-medium">{it.header}</div>
-                  {it.sub && (<div className="text-xs text-zinc-400 mt-0.5">{it.sub}</div>)}
-                </button>
-                {openIdx === i && (<div className="px-4 py-4 bg-zinc-900/70 border-t border-zinc-700">{it.content}</div>)}
-              </div>
-            ))}
-          </div>
-        );
-      }
-
-      /* ========= CodeBlock ========= */
-      function CodeBlock({ code }) {
-        const idRef = useRef(genCbId());
-        const codeRef = useRef(null);
-        const runTokenRef = useRef(0);
-
-        const [copyState, setCopyState] = useState("idle");
-        const [annotate, setAnnotate] = useState(false);
-        const [runState, setRunState] = useState({ running:false, imgs:[], err:null });
-
-        const py = useContext(PyContext);
-        const runMgr = useContext(RunContext);
-
-        const clearNow = useCallback(() => {
-          runTokenRef.current++;
-          setRunState({ running:false, imgs:[], err:null });
-        }, []);
-        // 註冊＋確保卸載時反註冊（修正記憶體外洩）
-        useEffect(() => {
-          return runMgr.register(idRef.current, clearNow);
-        }, [runMgr, clearNow]);
-
-        useEffect(() => { clearNow(); setAnnotate(false); }, [code]);
-
-        const displayed = annotate ? annotatePython(code) : code;
-
-        const onCopy = async () => {
-          const txt = codeRef.current?.innerText ?? displayed;
-          let ok = false;
-          try { if (window.isSecureContext && navigator.clipboard?.writeText) { await navigator.clipboard.writeText(txt); ok = true; } } catch (_) {}
-          if (!ok) {
-            try { const ta=document.createElement("textarea"); ta.value=txt; ta.setAttribute("readonly",""); ta.style.position="fixed"; ta.style.top="-1000px"; document.body.appendChild(ta); ta.focus(); ta.select(); ok=document.execCommand("copy"); document.body.removeChild(ta); } catch(_) { ok=false; }
-          }
-          if (!ok && codeRef.current) { const sel=window.getSelection(); if (sel) { sel.removeAllRanges(); const range=document.createRange(); range.selectNodeContents(codeRef.current); sel.addRange(range); } }
-          setCopyState(ok?"ok":"fail"); setTimeout(()=>setCopyState("idle"),2000);
-        };
-
-        const onRun = async () => {
-          const { runSeq } = runMgr.start(idRef.current); // 廣播清空其他卡片
-          const token = ++runTokenRef.current;
-          setRunState({ running:true, imgs:[], err:null });
-          try {
-            const imgs = await py.run(code); // Worker 佇列 + 逾時保護
-            if (token !== runTokenRef.current) return;
-            setRunState({ running:false, imgs, err:null });
-          } catch (e) {
-            if (token !== runTokenRef.current) return;
-            setRunState({ running:false, imgs:[], err:String(e && e.message ? e.message : e) });
-          } finally {
-            runMgr.done(idRef.current, runSeq);
-          }
-        };
-
-        const onClear = () => {
-          clearNow();
-          runMgr.evictIfCurrent(idRef.current);
-        };
-
-        return (
-          <div className="grid md:grid-cols-2 gap-3">
-            <div className="border border-zinc-700 rounded-xl overflow-hidden">
-              <div className="flex items-center gap-2 justify-between px-3 py-2 bg-zinc-800/60 border-b border-zinc-700">
-                <span className="text-xs uppercase tracking-wider text-zinc-400">Python / Matplotlib</span>
-                <div className="flex items-center gap-2">
-                  <button className={`text-sm px-2 py-1 rounded-lg ${annotate?"bg-emerald-700":"bg-zinc-700 hover:bg-zinc-600"}`} onClick={() => setAnnotate(v=>!v)}>註解：{annotate?"開":"關"}</button>
-                  <button className={`text-sm px-2 py-1 rounded-lg ${runState.running ? "bg-zinc-700" : "bg-emerald-700 hover:bg-emerald-600"}`}
-                          disabled={runState.running}
-                          onClick={onRun}>
-                    {runState.running ? "執行中…" : "執行（Python）"}
-                  </button>
-                  <button className="text-sm px-2 py-1 rounded-lg bg-zinc-700 hover:bg-zinc-600" onClick={onClear}>清空輸出</button>
-                  <button className={`text-sm px-2 py-1 rounded-lg ${copyState==="ok"?"bg-emerald-700":copyState==="fail"?"bg-amber-700":"bg-zinc-700 hover:bg-zinc-600"}`} onClick={onCopy}>複製（目前顯示）</button>
-                </div>
-              </div>
-              <pre className="p-3 text-sm overflow-auto" ref={codeRef}><code>{displayed}</code></pre>
-              {copyState==="fail" && <div className="px-3 pb-3 text-xs text-amber-400">無法直接寫入剪貼簿：已選取文字，請按 Ctrl/Cmd + C。</div>}
-            </div>
-
-            <div className="border border-zinc-700 rounded-xl overflow-hidden">
-              <div className="px-3 py-2 bg-zinc-800/60 border-b border-zinc-700 text-xs uppercase tracking-wider text-zinc-400">即時輸出</div>
-              <div className="p-3">
-                {runState.err && <div className="text-amber-400 text-sm whitespace-pre-wrap">錯誤：{runState.err}</div>}
-                {runState.running && <div className="text-zinc-400 text-sm mb-2">執行中…</div>}
-                {!runState.running && runState.imgs.length === 0 && !runState.err && (
-                  <div className="text-zinc-500 text-sm">尚未執行。</div>
-                )}
-                <div className="grid gap-3">
-                  {runState.imgs.map((src, i) => (
-                    <div key={i} className="rounded-lg overflow-hidden border border-zinc-800 bg-zinc-900/30">
-                      <img src={src} alt={`matplotlib-output-${i}`} className="w-full h-auto block"/>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      }
-
-      /* ========= 範例資料（全面改為 OOP 投影） ========= */
-      const DEMOS = [
-        {
-          id: "demo-first-plot",
-          title: "第一張圖：平方函數",
-          goal: "使用 NumPy 產生 x 與 y=x**2，畫線並加基本標註。",
-          code: `import numpy as np
+    function CodeBlock({id,code,projection}){
+      const {start,done,register} = useContext(RunContext);
+      const worker = useWorker();
+      const [state,setState] = useState({running:false,imgs:[],err:null});
+      const tokenRef = useRef(0);
+      useEffect(()=> register(keep=>{if(keep!==id)setState({running:false,imgs:[],err:null});}),[id]);
+      const deferred = useDeferredValue(useMemo(()=>code,[code]));
+      const run = ()=>{
+        const epoch = start(id);
+        const token = ++tokenRef.current;
+        setState({running:true,imgs:[],err:null});
+        const src = `
 import matplotlib.pyplot as plt
-
-x = np.linspace(-2, 2, 5)
-y = x**2
-
-plt.plot(x, y)
-plt.title("Square function")
-plt.xlabel("x")
-plt.ylabel("y = x**2")
-plt.grid(True)
-plt.show()`
-        },
-        {
-          id: "demo-styles",
-          title: "線條樣式與多圖例",
-          goal: "一次畫三條曲線，展示顏色/線型/點型與 legend。",
-          code: `import numpy as np
-import matplotlib.pyplot as plt
-
-x = np.linspace(-1.4, 1.4, 7)
-plt.plot(x, x, 'g--', label='y=x')
-plt.plot(x, x**2, 'r:', label='y=x^2')
-plt.plot(x, x**3, 'b^', label='y=x^3')
-plt.legend(loc='best')
-plt.grid(True)
-plt.title("Multiple styles")
-plt.show()`
-        },
-        {
-          id: "demo-subplots",
-          title: "子圖佈局：2×2 與跨欄",
-          goal: "示範 subplot 與 subplot2grid 的差異與跨欄用法。",
-          code: `import numpy as np
-import matplotlib.pyplot as plt
-
-x = np.linspace(-1.4, 1.4, 30)
-plt.subplot(2,2,1); plt.plot(x, x); plt.title("Linear")
-plt.subplot(2,2,2); plt.plot(x, x**2); plt.title("Square")
-plt.subplot(2,2,3); plt.plot(x, x**3); plt.title("Cube")
-plt.subplot(2,2,4); plt.plot(x, x**4); plt.title("Fourth power")
-plt.suptitle("subplot(2,2,*)")
-plt.show()
-
-# grid layout with spans
-plt.subplot2grid((3,3), (0, 0), rowspan=2, colspan=2); plt.plot(x, x**2); plt.title("2x2 span")
-plt.subplot2grid((3,3), (0, 2)); plt.plot(x, x**3); plt.title("Top-right")
-plt.subplot2grid((3,3), (1, 2), rowspan=2); plt.plot(x, x**4); plt.title("Right column")
-plt.subplot2grid((3,3), (2, 0), colspan=2); plt.plot(x, x**5); plt.title("Bottom span")
-plt.suptitle("subplot2grid example")
-plt.show()`
-        },
-        {
-          id: "demo-oop",
-          title: "物件導向寫法：subplots()",
-          goal: "使用 fig, ax = plt.subplots() 明確取得 Figure 與 Axes。",
-          code: `import numpy as np
-import matplotlib.pyplot as plt
-
-x = np.linspace(-2, 2, 200)
-fig, (ax1, ax2) = plt.subplots(2,1, sharex=True, figsize=(6,4))
-ax1.plot(x, np.sin(3*x**2), "r-", label="sin(3x^2)")
-ax1.plot(x, np.cos(5*x**2), "b-", label="cos(5x^2)")
-ax1.legend(); ax1.grid(True); ax1.set_title("Top")
-ax2.plot(x, np.sin(3*x), "g-"); ax2.grid(True); ax2.set_title("Bottom")
-fig.suptitle("Object-oriented style")
-plt.show()`
-        },
-        {
-          id: "demo-scales-ticks",
-          title: "坐標比例與刻度",
-          goal: "展示 linear/log/symlog 與手動刻度。",
-          code: `import numpy as np
-import matplotlib.pyplot as plt
-
-x = np.linspace(0.1, 15, 200)
-y = x**3/np.exp(2*x)
-
-plt.figure(1); plt.plot(x,y); plt.yscale('linear'); plt.title('linear'); plt.grid(True)
-plt.figure(2); plt.plot(x,y); plt.yscale('log');    plt.title('log');    plt.grid(True)
-plt.figure(3); plt.plot(x,y); plt.yscale('symlog', linthresh=0.05); plt.title('symlog'); plt.grid(True)
-
-# manual ticks
-x2 = np.linspace(-2, 2, 100)
-ax = plt.figure(4).gca()
-ax.plot(x2, x2**3)
-ax.set_xticks(np.arange(-2, 3, 1))
-ax.set_yticks(np.arange(-8, 9, 2))
-plt.title("manual ticks")
-plt.grid(True)
-plt.show()`
-        },
-        {
-          id: "demo-polar-3d",
-          title: "極座標與 3D 曲面（OOP）",
-          goal: "使用 OOP 明確建立投影，避免隱式狀態問題。",
-          code: `import numpy as np
-import matplotlib.pyplot as plt
-
-# Polar (OOP)
-theta = np.linspace(0, 2*np.pi, 400)
 fig = plt.figure()
-ax = fig.add_subplot(1, 1, 1, projection='polar')
-ax.plot(theta, 0.5*np.cos(5*theta))
-ax.set_title("Polar curve")
-plt.show()
-
-# 3D surface (OOP)
-x = np.linspace(-5,5,50); y = np.linspace(-5,5,50)
-X, Y = np.meshgrid(x, y); R = np.sqrt(X**2 + Y**2); Z = np.sin(R)
-fig = plt.figure()
-ax = fig.add_subplot(1, 1, 1, projection='3d')
-ax.plot_surface(X, Y, Z, rstride=1, cstride=1, linewidth=0.1)
-ax.set_title("3D surface")
-plt.show()`
-        },
-        {
-          id: "demo-scatter-hist-img",
-          title: "散點 / 直方圖 / 顯示影像",
-          goal: "常見資料圖形化。",
-          code: `import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
-
-np.random.seed(42)
-x, y = np.random.rand(2, 100)
-plt.scatter(x, y, s=50, alpha=0.6); plt.grid(True); plt.title("scatter")
-plt.show()
-
-data = np.random.randn(400)
-plt.hist(data, bins=20, rwidth=0.9); plt.title("hist"); plt.grid(True)
-plt.show()
-
-# image: use fallback if file missing
-try:
-    img = mpimg.imread("my_image.png")
-except Exception:
-    u = np.linspace(0, 1, 128); v = np.linspace(0, 1, 128)
-    U, V = np.meshgrid(u, v)
-    img = 0.5 + 0.5*np.sin(10*U)*np.cos(10*V)
-plt.imshow(img, cmap="viridis"); plt.axis('off'); plt.title("image")
-plt.show()`
-        }
-      ];
-
-      const USE_CASES = [
-        {
-          id: "basics",
-          title: "快速上手：第一張圖",
-          brief: "先用 plt.plot() 畫出資料，再用 plt.show() 顯示；加上標題/座標/格線提升可讀性。",
-          bullets: ["plt.plot(x, y) 畫線；若只有 y，x 會用 0..N-1", "plt.title / xlabel / ylabel / grid 增強可讀性", "plt.axis([xmin,xmax,ymin,ymax]) 控制視窗"],
-          functions: ["plt.plot","plt.show","plt.title","plt.xlabel","plt.ylabel","plt.grid","plt.axis"],
-          quick: `import matplotlib.pyplot as plt
-plt.plot([1,2,3])
-plt.title("Quick example")
-plt.show()`
-        },
-        {
-          id: "style",
-          title: "樣式與多條曲線",
-          brief: "顏色、線型、點樣式可在第三參數 fmt 設定；多條線可多次呼叫 plot。",
-          bullets: ['fmt 例："g--"=綠色虛線、"r:"=紅色點線、"b^"=藍色三角形', "回傳 Line2D，可再 set_alpha/set_linewidth", "legend 搭配 label 顯示圖例"],
-          functions: ["plt.plot","plt.legend"],
-          quick: `import numpy as np
-import matplotlib.pyplot as plt
-x = np.linspace(-1,1,10)
-plt.plot(x, x**2, label='square')
-plt.plot(x, x**3, label='cube')
-plt.legend(); plt.grid(True); plt.title("Legend & grid")
-plt.show()`
-        }
-      ];
-
-      /* ========= 函式清單（投影例子全部 OOP） ========= */
-      const FUNCTIONS = [
-        {
-          id: "cat-01-basics",
-          title: "① 基礎繪圖與標註（常用函式）",
-          items: [
-            { name: "plt.plot([x], y, [fmt], ...)", desc: "畫線/點；fmt 控制顏色/線型/點型。", what: "最常用的繪圖函式。", uses: ["函數可視化","時間序列趨勢"], code: `import numpy as np
-import matplotlib.pyplot as plt
-x = np.linspace(-2,2,5)
-plt.plot(x, x**2, 'g--')
-plt.title("Title")
-plt.show()` },
-            { name: "plt.legend(loc='best')", desc: "圖例（需先在 plot 時給 label）。", code: `import numpy as np
-import matplotlib.pyplot as plt
-x = np.linspace(-1,1,10)
-plt.plot(x,x**2,label='square')
-plt.plot(x,x**3,label='cube')
-plt.legend(loc='best'); plt.grid(True); plt.title("Legend")
-plt.show()` },
-            { name: "plt.savefig(path, ...)", desc: "輸出圖檔。", uses: ["報告/網頁輸出"], code: `import numpy as np
-import matplotlib.pyplot as plt
-x=np.linspace(-1,1,50)
-plt.plot(x,x**2)
-plt.title("Saved figure")
-plt.savefig('square.png', transparent=True)
-plt.show()` },
-          ]
-        },
-        {
-          id: "cat-02-layout",
-          title: "② 子圖與多圖（物件導向/版面配置）",
-          items: [
-            { name: "plt.subplot(r,c,i)", desc: "在 r×c 網格中選第 i 個子圖。", code: `import numpy as np
-import matplotlib.pyplot as plt
-x = np.linspace(-1,1,30)
-plt.subplot(221); plt.plot(x,x); plt.title("Linear")
-plt.subplot(222); plt.plot(x,x**2); plt.title("Square")
-plt.subplot(223); plt.plot(x,x**3); plt.title("Cube")
-plt.subplot(224); plt.plot(x,x**4); plt.title("Fourth")
-plt.show()` },
-            { name: "plt.subplots(nrows, ncols, ...)", desc: "物件導向寫法：回傳 figure 與 axes（陣列）。", code: `import numpy as np
-import matplotlib.pyplot as plt
-x=np.linspace(-2,2,200)
-fig,(ax1,ax2)=plt.subplots(2,1,sharex=True)
-ax1.plot(x,np.sin(3*x**2)); ax1.grid(True); ax1.set_title("Top")
-ax2.plot(x,np.cos(5*x**2)); ax2.grid(True); ax2.set_title("Bottom")
-fig.suptitle('Object-oriented subplots')
-plt.show()` },
-          ]
-        },
-        {
-          id: "cat-03-special",
-          title: "③ 特殊投影與 3D",
-          items: [
-            { name: "fig.add_subplot(..., projection='polar')", desc: "極座標繪圖（OOP）。", code: `import numpy as np
-import matplotlib.pyplot as plt
-theta=np.linspace(0,2*np.pi,400)
-fig = plt.figure()
-ax = fig.add_subplot(1,1,1, projection='polar')
-ax.plot(theta, 0.5*np.cos(5*theta))
-ax.set_title("Polar")
-plt.show()` },
-            { name: "fig.add_subplot(..., projection='3d') + ax.plot_surface()", desc: "3D 曲面（OOP）。", code: `import numpy as np
-import matplotlib.pyplot as plt
-x=np.linspace(-5,5,50); y=np.linspace(-5,5,50)
-X,Y=np.meshgrid(x,y); Z=np.sin(np.sqrt(X**2+Y**2))
-fig = plt.figure()
-ax = fig.add_subplot(1,1,1, projection='3d')
-ax.plot_surface(X,Y,Z,linewidth=0.1)
-ax.set_title("3D surface")
-plt.show()` },
-            { name: "plt.contourf() + plt.colorbar()", desc: "等高線填色 + 色條。", code: `import numpy as np
-import matplotlib.pyplot as plt
-x=np.linspace(-5,5,50); y=np.linspace(-5,5,50)
-X,Y=np.meshgrid(x,y); Z=np.sin(np.sqrt(X**2+Y**2))
-plt.contourf(X,Y,Z,levels=20)
-plt.colorbar(); plt.title("Contourf")
-plt.show()` },
-          ]
-        },
-        {
-          id: "cat-04-scatter-hist-image",
-          title: "④ 散點 / 直方 / 影像",
-          items: [
-            { name: "plt.scatter(x, y, s=..., c=..., alpha=...)", desc: "散點圖（大小/顏色/透明度）。", code: `import numpy as np
-import matplotlib.pyplot as plt
-np.random.seed(0)
-x,y=np.random.rand(2,100)
-plt.scatter(x,y,s=80,alpha=0.5)
-plt.title("Scatter")
-plt.grid(True); plt.show()` },
-            { name: "plt.hist(data, bins=...)", desc: "直方圖（bins 可為數量或邊界陣列）。", code: `import numpy as np
-import matplotlib.pyplot as plt
-data=np.random.randn(500)
-plt.hist(data,bins=20,rwidth=0.9)
-plt.title("Histogram")
-plt.grid(True); plt.show()` },
-            { name: "mpimg.imread() / plt.imshow()", desc: "讀圖與顯示（無檔案自造影像）。", code: `import matplotlib.image as mpimg
-import matplotlib.pyplot as plt
-import numpy as np
-try:
-    img = mpimg.imread('your.png')
-except Exception:
-    t = np.linspace(0,1,256)
-    X, Y = np.meshgrid(t, t)
-    img = 0.5 + 0.5*np.sin(12*X)*np.cos(9*Y)
-plt.imshow(img); plt.axis('off'); plt.title('Image')
-plt.show()` },
-          ]
-        }
-      ];
-
-      /* ========= 頁面骨架 ========= */
-      function Breadcrumbs({ trail }) {
-        return (
-          <nav className="text-sm text-zinc-400">
-            {trail.map((t, i) => (
-              <span key={i}>
-                <span className={"" + (i === trail.length - 1 ? " text-zinc-200" : " hover:text-zinc-200 cursor-pointer")}>{t.label}</span>
-                {i < trail.length - 1 && <span className="mx-2">›</span>}
-              </span>
-            ))}
-          </nav>
-        );
-      }
-
-      function Header({ section, setSection }) {
-        return (
-          <header className="sticky top-0 z-40 border-b border-zinc-800 backdrop-blur bg-zinc-950/80">
-            <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
-              <div className="flex items-center gap-2 font-semibold text-lg"><span className="inline-block size-2 rounded-full bg-emerald-400" />Matplotlib 懶人包</div>
-              <div className="ml-auto flex items-center gap-2">
-                <button className={`px-3 py-2 rounded-xl hover:bg-zinc-800/60 transition ${section==="home"?"border border-zinc-700 bg-zinc-800/40":""}`} onClick={() => { setSection("home"); }}>首頁</button>
-                <Dropdown label="用途" items={<div className="grid grid-cols-1 gap-1">{USE_CASES.map((u)=>(<button key={u.id} className="text-left px-3 py-2 rounded-lg hover:bg-zinc-800/70" onClick={() => { setSection("uses"); window.location.hash = `#/uses/${u.id}`; }}>{u.title}</button>))}</div>} />
-                <Dropdown label="函式/專案演示" items={<div className="grid grid-cols-1 gap-1">{DEMOS.map((d)=>(<button key={d.id} className="text-left px-3 py-2 rounded-lg hover:bg-zinc-800/70" onClick={() => { setSection("demos"); window.location.hash = `#/demos/${d.id}`; }}>{d.title}</button>))}</div>} />
-                <Dropdown label="函式細節與範例" items={<div className="grid grid-cols-1 gap-1 max-h-80 overflow-auto pr-1">{FUNCTIONS.map((c)=>(<button key={c.id} className="text-left px-3 py-2 rounded-lg hover:bg-zinc-800/70" onClick={() => { setSection("funcs"); window.location.hash = `#/funcs/${c.id}`; }}>{c.title}</button>))}</div>} />
-              </div>
-            </div>
-          </header>
-        );
-      }
-
-      function Home({ setSection }) {
-        return (
-          <section className="space-y-8">
-            <div className="grid md:grid-cols-2 gap-6 items-center">
-              <div className="space-y-4">
-                <h1 className="text-3多 font-semibold leading-tight">Matplotlib 懶人包</h1>
-                <p className="text-zinc-300">互動式教學與查詢：在瀏覽器直接執行範例、支援每行註解、單一執行與自動清除輸出。</p>
-                <div className="flex flex-wrap gap-3">
-                  <button className="px-4 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500 hover:bg-emerald-500/30" onClick={() => setSection("uses")}>由用途開始</button>
-                  <button className="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700" onClick={() => setSection("demos")}>看演示</button>
-                  <button className="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700" onClick={() => setSection("funcs")}>查函式</button>
-                </div>
-              </div>
-              <div className="rounded-2xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 p-6">
-                <ol className="space-y-3 text-zinc-300">
-                  <li>① <b>用途</b>：任務導向範例。</li>
-                  <li>② <b>函式/專案演示</b>：可直接執行、即時出圖。</li>
-                  <li>③ <b>函式細節</b>：常用函式與最小可行範例。</li>
-                </ol>
-              </div>
-            </div>
-          </section>
-        );
-      }
-
-      function Uses({ sub, setSub, onGotoFunc }) {
-        const current = USE_CASES.find((u) => u.id === sub) || USE_CASES[0];
-        return (
-          <section className="grid lg:grid-cols-[260px,1fr] gap-6">
-            <aside className="space-y-2">
-              <div className="text-xs uppercase tracking-wider text-zinc-400 mb-2">用途列表</div>
-              <div className="space-y-1">
-                {USE_CASES.map((u) => (
-                  <button key={u.id} onClick={() => setSub(u.id)} className={`w	full text-left px-3 py-2 rounded-xl border ${current.id===u.id?"border-emerald-600 bg-emerald-500/10":"border-zinc-700 hover:bg-zinc-800/60"}`}>{u.title}</button>
-                ))}
-              </div>
-            </aside>
-            <div className="space-y-6">
-              <header className="space-y-2">
-                <h2 className="text-2xl font-semibold">{current.title}</h2>
-                <p className="text-zinc-300">{current.brief}</p>
-              </header>
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="rounded-2xl border border-zinc-800 p-4 bg-zinc-900/40">
-                  <div className="text-sm text-zinc-400 mb-2">要點</div>
-                  <ul className="list-disc list-inside text-zinc-300 space-y-1">{current.bullets.map((b, i) => <li key={i}>{b}</li>)}</ul>
-                </div>
-                <div className="rounded-2xl border border-zinc-800 p-4 bg-zinc-900/40">
-                  <div className="text-sm text-zinc-400 mb-2">關聯函式（點擊跳至說明）</div>
-                  <div className="flex flex-wrap gap-2">
-                    {current.functions.map((f, i) => (
-                      <button
-                        key={`${current.id}:${f}`}
-                        onClick={() => onGotoFunc(f)}
-                        title={`前往 ${f} 的說明`}
-                        className="px-2 py-1 rounded-lg border border-emerald-700/50 bg-emerald-500/10 hover:bg-emerald-500/20 text-sm cursor-pointer"
-                      >{f}</button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div>
-                <Accordion items={[
-                  { header: "快速範例：最短可用圖", sub: "plot + show", content: <CodeBlock key="uses/quick-plot" code={current.quick} /> },
-                ]} />
-              </div>
-            </div>
-          </section>
-        );
-      }
-
-      function Demos({ sub, setSub }) {
-        const current = DEMOS.find((d) => d.id === sub) || DEMOS[0];
-        return (
-          <section className="grid lg:grid-cols-[280px,1fr] gap-6">
-            <aside>
-              <div className="text-xs uppercase tracking-wider text-zinc-400 mb-2">演示清單</div>
-              <div className="space-y-1">
-                {DEMOS.map((d) => (
-                  <button key={d.id} onClick={() => setSub(d.id)} className={`w-full text-left px-3 py-2 rounded-xl border ${current.id===d.id?"border-emerald-600 bg-emerald-500/10":"border-zinc-700 hover:bg-zinc-800/60"}`}>{d.title}</button>
-                ))}
-              </div>
-            </aside>
-            <div className="space-y-5">
-              <header className="space-y-1">
-                <div className="text-sm text-zinc-400">目標</div>
-                <h2 className="text-2xl font-semibold">{current.title}</h2>
-                <p className="text-zinc-300">{current.goal}</p>
-              </header>
-              <CodeBlock key={current.id} code={current.code} />
-            </div>
-          </section>
-        );
-      }
-
-      function Funcs({ sub, setSub, itemSlug }) {
-        const current = FUNCTIONS.find((c) => c.id === sub) || FUNCTIONS[0];
-
-        useEffect(() => {
-          if (!itemSlug) return;
-          const el = document.getElementById('func-item-' + itemSlug);
-          if (el) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            el.classList.add('ring-2','ring-emerald-500');
-            setTimeout(() => el.classList.remove('ring-2','ring-emerald-500'), 1200);
-          }
-        }, [itemSlug, current.id]);
-
-        return (
-          <section className="grid lg:grid-cols-[300px,1fr] gap-6">
-            <aside>
-              <div className="text-xs uppercase tracking-wider text-zinc-400 mb-2">分類</div>
-              <div className="space-y-1">
-                {FUNCTIONS.map((c) => (
-                  <button key={c.id} onClick={() => setSub(c.id)} className={`w-full text-left px-3 py-2 rounded-xl border ${current.id===c.id?"border-emerald-600 bg-emerald-500/10":"border-zinc-700 hover:bg-zinc-800/60"}`}>{c.title}</button>
-                ))}
-              </div>
-            </aside>
-            <div className="space-y-6">
-              <header>
-                <h2 className="text-2xl font-semibold mb-1">{current.title}</h2>
-                <p className="text-zinc-300">常用函式與最小可行範例，可直接執行；需要時可切換「每行註解」。</p>
-              </header>
-              <div className="space-y-6">
-                {current.items.map((it) => {
-                  const slug = slugifyItemName(it.name);
-                  const k = `${current.id}:${slug}`;
-                  return (
-                    <div id={`func-item-${slug}`} key={k} className="rounded-2xl border border-zinc-800 p-4 bg-zinc-900/40 space-y-3">
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                        <div className="font-mono text-emerald-300 text-sm">{it.name}</div>
-                        {it.desc && <span className="text-xs text-zinc-400">— {it.desc}</span>}
-                      </div>
-                      {it.what && (<div><div className="text-sm text-zinc-400 mb-1">作用</div><p className="text-zinc-300 leading-relaxed">{it.what}</p></div>)}
-                      {(it.uses && it.uses.length>0) && (<div><div className="text-sm text-zinc-400 mb-1">常見用途</div><ul className="list-disc list-inside text-zinc-300 space-y-1">{it.uses.map((u, idx) => <li key={`${k}:use:${idx}`}>{u}</li>)}</ul></div>)}
-                      {it.code && <CodeBlock key={`${k}:code`} code={it.code} />}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </section>
-        );
-      }
-
-      function Site() {
-        const [section, setSection] = useState("home");
-        const [sub, setSub] = useState(null);
-        const [itemSlug, setItemSlug] = useState(null);
-
-        useEffect(() => {
-          const syncFromHash = () => {
-            const raw = window.location.hash.replace(/^#\/?/, "");
-            if (!raw) return;
-            const [path, query] = raw.split("?");
-            const [s, p] = path.split("/");
-            if (["home","uses","demos","funcs"].includes(s)) {
-              setSection(s);
-              setSub(p || null);
-            }
-            const qs = new URLSearchParams(query || "");
-            const it = qs.get("item");
-            setItemSlug(it || null);
-          };
-          syncFromHash();
-          window.addEventListener("hashchange", syncFromHash);
-          return () => window.removeEventListener("hashchange", syncFromHash);
-        }, []);
-
-        useEffect(() => {
-          let newHash = section + (sub ? "/" + sub : "");
-          if (section === 'funcs' && itemSlug) newHash += `?item=${itemSlug}`;
-          if (window.location.hash !== "#" + newHash) window.location.hash = newHash;
-        }, [section, sub, itemSlug]);
-
-        const gotoFunctionDetail = (label) => {
-          for (const c of FUNCTIONS) {
-            for (const it of c.items) {
-              const tokens = tokensFromName(it.name);
-              if (tokens.includes(label) || it.name.startsWith(label) || it.name.includes(label)) {
-                const slug = slugifyItemName(it.name);
-                setSection('funcs'); setSub(c.id); setItemSlug(slug);
-                requestAnimationFrame(() => setTimeout(() => {
-                  const el = document.getElementById('func-item-' + slug);
-                  if (el) {
-                    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    el.classList.add('ring-2','ring-emerald-500');
-                    setTimeout(() => el.classList.remove('ring-2','ring-emerald-500'), 1200);
-                  }
-                }, 30));
-                return;
-              }
-            }
-          }
-          alert(`尚未收錄「${label}」的說明。`);
+ax = fig.add_subplot(111${projection?`, projection='${projection}'`:''})
+${code}
+`;
+        // set handler before posting to avoid race with worker response
+        worker.worker.onmessage = e=>{
+          const {ok,token:rt,imgs,err} = e.data;
+          if(rt!==token) return;
+          if(!done(id,epoch)) return;
+          if(ok) setState({running:false,imgs,err:null});
+          else setState({running:false,imgs:[],err});
         };
+        worker.post({code:src,token});
+      };
+      return <div className="mb-6">
+        <pre className="bg-zinc-800 p-4 rounded text-sm overflow-auto w-full"><code>{deferred}</code></pre>
+        <div className="flex gap-2 mb-2">
+          <button onClick={run} className="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded">執行</button>
+          <button onClick={()=>setState({running:false,imgs:[],err:null})} className="px-3 py-1 bg-zinc-700 hover:bg-zinc-600 rounded">清空輸出</button>
+        </div>
+        {state.running && <div className="text-amber-500">執行中...</div>}
+        {state.err && <div className="text-rose-500 whitespace-pre-wrap">{state.err}</div>}
+        <div className="space-y-2">
+          {state.imgs.map((img,i)=> img==='TRUNCATED' ? <div key={i} className="text-amber-500">已截斷</div> : <img key={i} src={img} className="w-full" />)}
+        </div>
+      </div>;
+    }
 
-        const trail = useMemo(() => {
-          const t = [{ label: "首頁" }];
-          if (section === "uses") t.push({ label: "用途" });
-          if (section === "demos") t.push({ label: "函式/專案演示" });
-          if (section === "funcs") t.push({ label: "函式細節與範例" });
-          if (sub) {
-            const label = (section === "uses" && USE_CASES.find((u) => u.id === sub)?.title)
-              || (section === "demos" && DEMOS.find((d) => d.id === sub)?.title)
-              || (section === "funcs" && FUNCTIONS.find((c) => c.id === sub)?.title)
-              || null;
-            if (label) t.push({ label });
-          }
-          return t;
-        }, [section, sub]);
+    function App(){
+      const [route,setRoute] = useHashRouter();
+      const changeSection = s=> startTransition(()=>setRoute({section:s}));
+      return <div>
+        <header className="p-4 flex gap-4 bg-zinc-900 sticky top-0">
+          {['home','funcs'].map(sec=>
+            <button key={sec} onClick={()=>changeSection(sec)} className={`px-2 py-1 rounded ${route.section===sec?'bg-emerald-700':'bg-zinc-700 hover:bg-zinc-600'}`}>{sec}</button>
+          )}
+        </header>
+        <main className="p-4">
+          {route.section==='home' && <h1 className="text-3xl mb-4">Matplotlib 懶人包</h1>}
+          {route.section==='funcs' && <div>
+            <h2 className="text-2xl mb-4">範例</h2>
+            <CodeBlock id="polar" projection="polar" code={`ax.plot([0,1,2],[0,1,0])\n`} />
+            <CodeBlock id="three" projection="3d" code={`ax.plot([0,1],[0,1],[0,1])\n`} />
+          </div>}
+        </main>
+      </div>;
+    }
 
-        return (
-          <RunProvider>
-            <PyProvider>
-              <div className="min-h-screen">
-                <Header section={section} setSection={setSection} />
-                <main className="max-w-7xl mx-auto px-4 py-6">
-                  <div className="mb-4"><Breadcrumbs trail={trail} /></div>
-                  {section === "home" && <Home setSection={setSection} />}
-                  {section === "uses" && <Uses sub={sub} setSub={setSub} onGotoFunc={gotoFunctionDetail} />}
-                  {section === "demos" && <Demos sub={sub} setSub={setSub} />}
-                  {section === "funcs" && <Funcs sub={sub} setSub={setSub} itemSlug={itemSlug} />}
-                </main>
-                <footer className="border-t border-zinc-800 mt-8">
-                  <div className="max-w-7xl mx-auto px-4 py-6 text-sm text-zinc-400 flex flex-wrap items-center gap-2">
-                    <span>© {new Date().getFullYear()} Matplotlib 懶人包</span>
-                    <span className="mx-2">·</span>
-                    <span>佈署：GitHub Pages / Vercel</span>
-                  </div>
-                </footer>
-              </div>
-            </PyProvider>
-          </RunProvider>
-        );
-      }
-
-      ReactDOM.createRoot(document.getElementById('root')).render(<Site />);
-    </script>
-  </body>
+    ReactDOM.createRoot(document.getElementById('root')).render(<RunProvider><App/></RunProvider>);
+  </script>
+</body>
 </html>
