@@ -70,71 +70,305 @@
       let _nextCbId = 1; const genCbId = () => `cb-${_nextCbId++}`;
 
       /* ========= 行內註解（顯示/複製用） ========= */
-      function explainOne(stmt){
-        const s = stmt.trim();
-        if (!s) return "空行";
-        if (s.startsWith("#")) return "註解";
-        if (/^import numpy as np\b/.test(s)) return "匯入 NumPy 並命名為 np";
-        if (/^import matplotlib\.pyplot as plt\b/.test(s)) return "匯入 Matplotlib 並命名為 plt";
-        if (/^import matplotlib\.image as mpimg\b/.test(s)) return "匯入影像模組 mpimg";
-        if (/^from mpl_toolkits\.mplot3d import /.test(s)) return "啟用 3D 投影（相容舊版）";
-        if (/^\w+\s*=\s*np\.linspace\(/.test(s)) return `建立等間距向量 ${s.split('=')[0].trim()}`;
-        if (/^\w+\s*=\s*np\.meshgrid\(/.test(s)) return "建立網格座標 X, Y";
-        if (/^\w+\s*=\s*np\.sin\(/.test(s)) return "計算正弦";
-        if (/^\w+\s*=\s*np\.cos\(/.test(s)) return "計算餘弦";
-        if (/^\w+\s*=\s*np\.sqrt\(/.test(s)) return "平方根";
-        if (/^np\.random\.seed\(/.test(s)) return "設定隨機種子（可重現）";
-        if (/^\w+\s*=\s*\w+\s*\*\*\s*\d+/.test(s)) return "次方並指派";
-        if (/^plt\.plot\(/.test(s)) return "折線/標記；可含樣式與 label";
-        if (/^plt\.scatter\(/.test(s)) return "散點圖";
-        if (/^plt\.hist\(/.test(s)) return "直方圖";
-        if (/^plt\.imshow\(/.test(s)) return "顯示影像陣列";
-        if (/^plt\.title\(/.test(s)) return "圖表標題";
-        if (/^plt\.xlabel\(/.test(s)) return "x 軸標籤";
-        if (/^plt\.ylabel\(/.test(s)) return "y 軸標籤";
-        if (/^plt\.grid\(/.test(s)) return "顯示格線";
-        if (/^plt\.legend\(/.test(s)) return "顯示圖例";
-        if (/^plt\.yscale\(/.test(s)) return "切換 y 軸比例";
-        if (/^plt\.minorticks_on\(/.test(s)) return "啟用次刻度";
-        if (/^plt\.axis\(/.test(s)) return "視窗範圍/比例";
-        if (/^plt\.savefig\(/.test(s)) return "輸出圖檔";
-        if (/^plt\.show\(\)/.test(s)) return "顯示目前圖形（這裡被攔截以取得影像）";
-        if (/^\w+\s*=\s*plt\.figure\(/.test(s)) return "建立 Figure 物件";
-        if (/^plt\.figure\(/.test(s)) return "建立/切換 Figure";
-        if (/^plt\.subplot2grid\(/.test(s)) return "自訂網格子圖";
-        if (/\badd_subplot\s*\([^)]*projection\s*=\s*['"]polar['"]/.test(s)) return "在 Figure 上建立極座標 Axes";
-        if (/\badd_subplot\s*\([^)]*projection\s*=\s*['"]3d['"]/.test(s))    return "在 Figure 上建立 3D Axes";
-        if (/plt\.subplot\s*\([^)]*projection\s*=\s*['"]polar['"]/.test(s)) return "（建議改用 fig.add_subplot(..., projection='polar')）";
-        if (/plt\.subplot\s*\([^)]*projection\s*=\s*['"]3d['"]/.test(s))    return "（建議改用 fig.add_subplot(..., projection='3d')）";
-        if (/^plt\.subplot\(/.test(s)) return "建立/切換子圖";
-        if (/^fig,.*=\s*plt\.subplots\(/.test(s)) return "物件導向：建立 Figure 與 Axes";
-        if (/^ax\d*\.plot_surface\(/.test(s) || /^ax\.plot_surface\(/.test(s)) return "3D 曲面";
-        if (/^ax\d*\.plot\(/.test(s) || /^ax\.plot\(/.test(s)) return "在指定 Axes 上繪線";
-        if (/^ax\.set_xticks\(/.test(s)) return "設定 x 主刻度";
-        if (/^ax\.set_yticks\(/.test(s)) return "設定 y 主刻度";
-        if (/^ax\.set_xticklabels\(/.test(s)) return "設定 x 刻度標籤";
-        if (/^ax\.set_yticklabels\(/.test(s)) return "設定 y 刻度標籤";
-        if (/^ax\.tick_params\(/.test(s)) return "刻度樣式";
-        if (/^plt\.contourf\(/.test(s)) return "等高線填色";
-        if (/^plt\.colorbar\(/.test(s)) return "加入色條";
-        return "一般 Python 指令";
-      }
-      const explainLine = (line) => {
-        const parts = line.split(';').map(p => p.trim()).filter(Boolean);
-        if (parts.length <= 1) return explainOne(line);
-        return parts.map(explainOne).join("；");
-      };
-      function annotatePython(code){
-        const lines = code.replace(/\r\n/g,'\n').split('\n');
-        const maxLen = lines.reduce((m, s) => Math.max(m, s.replace(/\s+$/,'').length), 0);
-        const col = Math.max(40, Math.min(88, maxLen + 2));
-        return lines.map(raw => {
-          const line = raw.replace(/\s+$/,'');
-          if (!line.trim()) return raw;
-          const pad = ' '.repeat(Math.max(1, col - line.length));
-          return line + pad + '# ' + explainLine(line);
-        }).join('\n');
-      }
+
+
+/* ---------- 小工具 ---------- */
+function trimQ(s){ return String(s || '').replace(/^['"]|['"]$/g, ''); }
+function isNum(x){ return /^[-+]?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(x.trim()); }
+function isStr(x){ return /^['"].*['"]$/.test(x.trim()); }
+function isBool(x){ return /^(True|False)$/i.test(x.trim()); }
+function isListTuple(x){ return /^[\[\(].*[\]\)]$/.test(x.trim()); }
+function asBoolWord(x){
+  if(/^(True)$/i.test(x)) return '開啟';
+  if(/^(False)$/i.test(x)) return '關閉';
+  return x;
+}
+
+/* 以逗號分割，但忽略括號/中括號/大括號與字串中的逗號 */
+function splitArgs(s){
+  const out=[]; let cur=''; let depthP=0,depthB=0,depthC=0, qs=null, esc=false;
+  for(let i=0;i<s.length;i++){
+    const ch=s[i];
+    if(qs){
+      cur+=ch;
+      if(ch==='\\' && !esc){ esc=true; }
+      else if(ch===qs && !esc){ qs=null; }
+      else { esc=false; }
+      continue;
+    }
+    if(ch==="'"||ch==='"'){ qs=ch; cur+=ch; continue; }
+    if(ch==='(') depthP++;
+    else if(ch===')') depthP=Math.max(0,depthP-1);
+    else if(ch==='[') depthB++;
+    else if(ch===']') depthB=Math.max(0,depthB-1);
+    else if(ch==='{') depthC++;
+    else if(ch==='}') depthC=Math.max(0,depthC-1);
+
+    if(ch===',' && depthP===0 && depthB===0 && depthC===0){
+      if(cur.trim()) out.push(cur.trim());
+      cur='';
+    }else cur+=ch;
+  }
+  if(cur.trim()) out.push(cur.trim());
+  return out;
+}
+
+/* 解析呼叫：名稱 + 位置參數/關鍵字參數 */
+function parseCall(stmt){
+  const m = stmt.match(/^([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*\((.*)\)\s*$/);
+  if(!m) return null;
+  const full = m[1], inside = m[2].trim();
+  if(!inside) return {fullName:full, pos:[], kw:{}};
+  const toks = splitArgs(inside);
+  const pos=[], kw={};
+  toks.forEach(tok=>{
+    const mm = tok.match(/^([A-Za-z_]\w*)\s*=\s*(.+)$/);
+    if(mm){ kw[mm[1]] = mm[2].trim(); }
+    else pos.push(tok);
+  });
+  return {fullName:full, pos, kw};
+}
+
+/* ---------- 解析 Matplotlib fmt 簡寫 ---------- */
+const MPL_COLOR = { b:'藍', g:'綠', r:'紅', c:'青', m:'洋紅', y:'黃', k:'黑', w:'白' };
+const MPL_LS = {'--':'虛線','-.':'點劃線',':':'點線','-':'實線'};
+const MPL_MK = {
+  '.':'點','o':'圓點','v':'倒三角','^':'三角','<':'左三角','>':'右三角',
+  '1':'三腳星1','2':'三腳星2','3':'三腳星3','4':'三腳星4',
+  's':'方塊','p':'五邊形','*':'星形','h':'六邊形1','H':'六邊形2',
+  '+':'加號','x':'叉號','D':'菱形','d':'窄菱形','|':'豎線','_':'橫線'
+};
+function parseMplFmt(fmtRaw){
+  if(!fmtRaw) return null;
+  const fmt = trimQ(fmtRaw).trim();
+  if(!fmt) return null;
+  let rest=fmt, linestyle=null, marker=null, color=null;
+  for(const key of ['--','-.',':','-']){
+    if(rest.includes(key)){ linestyle=MPL_LS[key]||key; rest=rest.replace(key,''); break; }
+  }
+  for(const k of Object.keys(MPL_MK)){
+    if(rest.includes(k)){ marker=MPL_MK[k]||k; rest=rest.replace(k,''); break; }
+  }
+  const c = rest.trim();
+  if(c){
+    if(MPL_COLOR[c]) color = MPL_COLOR[c];
+    else if(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(c)) color = `自訂色 ${c}`;
+    else if(/^(0(\.\d+)?|1(\.0+)?)$/.test(c)) color = `灰階 ${c}`;
+    else color = c; // 可能是顏色名（如 tab:blue）
+  }
+  const parts=[];
+  if(color) parts.push(`顏色=${color}`);
+  if(linestyle) parts.push(`線型=${linestyle}`);
+  if(marker) parts.push(`標記=${marker}`);
+  return parts.length? parts.join('、') : null;
+}
+
+/* ---------- 專門解譯：常見 NumPy / Matplotlib 呼叫 ---------- */
+function explainCall(fullName, pos, kw){
+  /* NumPy */
+  if(fullName==='np.linspace'){
+    const a = pos[0]??'-2', b=pos[1]??'2', n=pos[2]??'50';
+    const inc = '含端點';
+    return `建立等間距數列：從 ${a} 到 ${b}，共 ${n} 個點（${inc}）。步長 ≈ (終點-起點)/(點數-1)。`;
+  }
+  if(fullName==='np.arange'){
+    const start = pos.length===1? '0' : (pos[0]||'0');
+    const stop  = pos.length===1? (pos[0]||'') : (pos[1]||'');
+    const step  = pos.length>=3? (pos[2]||'1') : (kw.step||'1');
+    return `建立序列：從 ${start} 開始到 ${stop}（不含）每次 +${step}。`;
+  }
+  if(fullName==='np.meshgrid') return '把一維 x、y 轉成 2D 網格座標 X, Y（做等高線/曲面用）。';
+  if(fullName==='np.sqrt')     return '開根號（逐元素計算）。';
+  if(fullName==='np.sin')      return '套用正弦函數（逐元素）。';
+  if(fullName==='np.cos')      return '套用餘弦函數（逐元素）。';
+
+  /* Matplotlib 狀態式 API（plt.*） */
+  if(fullName==='plt.figure'){
+    return pos[0] ? `切換/建立第 ${pos[0]} 個圖形（Figure）。` : '建立新圖形（Figure）或切換至目前圖形。';
+  }
+  if(fullName==='plt.plot'){
+    let fmtArg=null;
+    if(pos.length>=3) fmtArg=pos[2];
+    else if(pos.length===2 && isStr(pos[1])) fmtArg=pos[1];
+    const descFmt = parseMplFmt(fmtArg);
+    const lab = kw.label?`，圖例標籤="${trimQ(kw.label)}"`:'';
+    const base = (pos.length>=2 && !isStr(pos[1])) ? '畫線：x 對 y' : '畫線：索引對 y';
+    return `${base}${descFmt?`（${descFmt}）`:''}${lab}`;
+  }
+  if(fullName==='plt.scatter'){
+    const size = kw.s?`、大小 s=${kw.s}`:'';
+    const c = kw.c?`、顏色 c=${kw.c}`:'';
+    const a = kw.alpha?`、透明度 alpha=${kw.alpha}`:'';
+    return `散點圖：以點呈現資料${size}${c}${a}。`;
+  }
+  if(fullName==='plt.hist'){
+    const bins = kw.bins || pos[1] || '預設分組數';
+    const rwd  = kw.rwidth?`、直方寬比例 rwidth=${kw.rwidth}`:'';
+    return `直方圖：把資料分成 ${bins} 組${rwd}。`;
+  }
+  if(fullName==='plt.imshow'){
+    const cmap = kw.cmap?`（色盤 ${trimQ(kw.cmap)}）`:'';
+    return `顯示影像/矩陣${cmap}。配合 plt.axis('off') 可隱藏座標軸。`;
+  }
+  if(fullName==='plt.title')   return `設定圖表標題為 "${trimQ(pos[0]||kw.label||'')}"。`;
+  if(fullName==='plt.xlabel')  return `設定 x 軸標籤為 "${trimQ(pos[0]||'')}"。`;
+  if(fullName==='plt.ylabel')  return `設定 y 軸標籤為 "${trimQ(pos[0]||'')}"。`;
+  if(fullName==='plt.grid'){
+    const v = pos[0] || kw.visible || 'True';
+    return `${asBoolWord(String(v))}格線。`;
+  }
+  if(fullName==='plt.legend'){
+    const loc = kw.loc?`，位置=${trimQ(kw.loc)}`:'';
+    return `顯示圖例${loc}（需在 plot 時提供 label）。`;
+  }
+  if(fullName==='plt.yscale'){
+    const t = trimQ(pos[0]||'linear');
+    if(t==='log')    return '把 y 軸切換成「對數刻度」。';
+    if(t==='symlog') return '把 y 軸切換成「對稱對數刻度」（可含負值）。';
+    return `把 y 軸切換成「${t}」刻度。`;
+  }
+  if(fullName==='plt.minorticks_on') return '打開「次刻度」（更細的刻度線）。';
+  if(fullName==='plt.axis'){
+    const v = pos[0]||'';
+    if(/^[\[\(]\s*[^,]+,\s*[^,]+,\s*[^,]+,\s*[^,]+\s*[\]\)]$/.test(v)){
+      return '設定可視範圍：[xmin, xmax, ymin, ymax]。';
+    }
+    return `設定/查詢座標軸屬性：${v}`;
+  }
+  if(fullName==='plt.savefig'){
+    const path = trimQ(pos[0]||kw.fname||'圖檔.png');
+    const t = ('transparent' in kw)? `；透明背景=${kw.transparent}`:'';
+    const dpi = kw.dpi?`；解析度 dpi=${kw.dpi}`:'';
+    return `把目前圖形存成檔案 "${path}"${t}${dpi}。`;
+  }
+  if(fullName==='plt.show') return '顯示目前圖形。';
+
+  if(fullName==='plt.subplot'){
+    return '切換到 r × c 的網格中第 i 個子圖。';
+  }
+  if(fullName==='plt.subplot2grid'){
+    return '以 grid 佈局建立子圖，支援跨列/跨欄。';
+  }
+  if(fullName==='plt.contourf') return '畫等高線填色圖（連續色帶顯示高低）。';
+  if(fullName==='plt.colorbar') return '在旁邊加上色條。';
+
+  /* Matplotlib OOP（fig/ax） */
+  if(fullName==='plt.subplots') return '建立 Figure 與一組/陣列 Axes（物件導向寫法）。';
+  if(/\.add_subplot$/.test(fullName)){
+    const proj = (kw.projection? trimQ(kw.projection): (pos.find(p=>/projection\s*=/.test(p))||'')).toString();
+    if(/polar/.test(proj)) return '在 Figure 上建立「極座標」子圖（projection=\'polar\'）。';
+    if(/3d/.test(proj))    return '在 Figure 上建立「3D」子圖（projection=\'3d\'）。';
+    return '在 Figure 上新增一個子圖（Axes）。';
+  }
+  if(/\.plot$/.test(fullName)){
+    let fmtArg=null;
+    if(pos.length>=3) fmtArg=pos[2];
+    else if(pos.length===2 && isStr(pos[1])) fmtArg=pos[1];
+    const descFmt = parseMplFmt(fmtArg);
+    return `在這個子圖上畫線${descFmt?`（${descFmt}）`:''}。`;
+  }
+  if(/\.plot_surface$/.test(fullName)) return '在 3D 子圖上畫曲面（plot_surface）。';
+  if(/\.set_xticks$/.test(fullName))   return '設定 x 軸主要刻度位置。';
+  if(/\.set_yticks$/.test(fullName))   return '設定 y 軸主要刻度位置。';
+  if(/\.set_xticklabels$/.test(fullName)) return '設定 x 軸刻度顯示文字。';
+  if(/\.set_yticklabels$/.test(fullName)) return '設定 y 軸刻度顯示文字。';
+  if(/\.tick_params$/.test(fullName))  return '調整刻度/標籤/刻度線樣式。';
+  if(/\.set_title$/.test(fullName))    return `設定子圖標題為 "${trimQ(pos[0]||'')}"。`;
+  if(/\.suptitle$/.test(fullName))     return `設定整個 Figure 的大標題為 "${trimQ(pos[0]||'')}"。`;
+
+  /* 影像讀取 */
+  if(fullName==='mpimg.imread'){
+    const path = trimQ(pos[0] || '');
+    return `讀取影像檔 "${path}" 為陣列。`;
+  }
+
+  return null; // 其它在 generic 規則處理
+}
+
+/* ---------- 行為型（非呼叫）規則：賦值/運算等 ---------- */
+function explainCompute(stmt){
+  // x = np.linspace(...)
+  const lin = stmt.match(/^([A-Za-z_]\w*)\s*=\s*np\.linspace\((.*)\)\s*$/);
+  if(lin){
+    const v = lin[1], args = splitArgs(lin[2]);
+    const a = args[0]??'-2', b=args[1]??'2', n=args[2]??'50';
+    return `把「從 ${a} 到 ${b} 等間距，共 ${n} 點」的數列存為 ${v}。`;
+  }
+  // X, Y = np.meshgrid(x, y)
+  const mg = stmt.match(/^([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*)\s*=\s*np\.meshgrid\((.*)\)\s*$/);
+  if(mg){
+    const X=mg[1], Y=mg[2];
+    return `把兩個 1D 序列轉成 2D 網格，存成 ${X}, ${Y}。`;
+  }
+  // r = np.sqrt(X**2 + Y**2)
+  const pow = stmt.match(/^([A-Za-z_]\w*)\s*=\s*([A-Za-z_]\w*)\s*\*\*\s*(\d+)\s*$/);
+  if(pow){
+    const v = pow[1], src=pow[2], e=pow[3];
+    return `把 ${src} 的每個元素做 ${e} 次方，存成 ${v}。`;
+  }
+  // y = np.sin(x) / np.cos(x) 等
+  const ufunc = stmt.match(/^([A-Za-z_]\w*)\s*=\s*np\.(sin|cos|sqrt)\((.+)\)\s*$/);
+  if(ufunc){
+    const v=ufunc[1], f=ufunc[2], arg=ufunc[3];
+    const map = {sin:'正弦',cos:'餘弦',sqrt:'開根號'};
+    return `把 ${arg} 逐元素套用「${map[f]}」，結果存成 ${v}。`;
+  }
+  // 一般賦值：y = x**2 + 1
+  const asn = stmt.match(/^([A-Za-z_]\w*)\s*=\s*(.+)$/);
+  if(asn){
+    const v = asn[1];
+    return `計算右側表達式，結果存到變數 ${v}。`;
+  }
+  return null;
+}
+
+/* ---------- 單行解釋 ---------- */
+function explainOne(stmt){
+  const s = stmt.trim();
+  if(!s) return '（空行）';
+  if(/^#/.test(s)) return '（註解）';
+
+  // import
+  if(/^import\s+numpy\s+as\s+np\b/.test(s)) return '載入 NumPy，縮寫為 np（做數學/陣列運算）。';
+  if(/^import\s+matplotlib\.pyplot\s+as\s+plt\b/.test(s)) return '載入 Matplotlib 的繪圖介面，縮寫為 plt。';
+  if(/^import\s+matplotlib\.image\s+as\s+mpimg\b/.test(s)) return '載入 Matplotlib 的影像工具，縮寫為 mpimg。';
+  if(/^from\s+mpl_toolkits\.mplot3d\s+import\s+Axes3D\b/.test(s)) return '啟用 3D 繪圖支援。';
+
+  // 呼叫（高優先）
+  const c = parseCall(s);
+  if(c){
+    const msg = explainCall(c.fullName, c.pos, c.kw);
+    if(msg) return msg;
+  }
+
+  // 計算/賦值 規則
+  const comp = explainCompute(s);
+  if(comp) return comp;
+
+  // 其它：至少給出動作型解釋
+  if(/\)$/.test(s)) return '呼叫函式/方法並套用到目前的圖或資料。';
+  return '執行這行程式，更新變數或圖表狀態。';
+}
+
+/* ---------- 多敘述分號分割 ---------- */
+function explainLine(line){
+  const parts = line.split(';').map(p=>p.trim()).filter(Boolean);
+  if(parts.length<=1) return explainOne(line);
+  return parts.map(explainOne).join('；');
+}
+
+/* ---------- 產生帶註解的程式碼文字 ---------- */
+function annotatePython(code){
+  const lines = String(code||'').replace(/\r\n/g,'\n').split('\n');
+  const maxLen = lines.reduce((m, s)=>Math.max(m, s.replace(/\s+$/,'').length), 0);
+  const col = Math.max(40, Math.min(96, maxLen + 2));
+  return lines.map(raw=>{
+    const line = raw.replace(/\s+$/,'');
+    const note = explainLine(line);
+    const pad = line.trim()? ' '.repeat(Math.max(1, col - line.length)) : '';
+    return line.trim()? (line + pad + '# ' + note) : line;
+  }).join('\n');
+}
 
       /* ========= 全域執行管理 ========= */
       const RunContext = createContext({
@@ -280,96 +514,124 @@ def _run_matplotlib_user_code(code: str):
         const blob = new Blob([src], { type:'application/javascript' });
         return URL.createObjectURL(blob);
       }
+const PyContext = createContext({
+  ready: false, loading: true, error: null, busy: false,
+  run: async () => { throw new Error('not ready'); },
+  restart: () => {}
+});
 
-      const PyContext = createContext({ ready:false, loading:true, error:null, busy:false, run: async () => { throw new Error('not ready'); } });
+function PyProvider({ children }) {
+  const [state, setState] = useState({ ready:false, loading:true, error:null, busy:false });
+  const workerRef = useRef(null);
+  const timeoutRef = useRef(null);
+  const queueRef = useRef(Promise.resolve());
+  const runCountRef = useRef(0);
+  const pendingResolveRef = useRef(null);
+  const pendingRejectRef = useRef(null);
 
-      function PyProvider({ children }) {
-        const [state, setState] = useState({ ready:false, loading:true, error:null, busy:false });
-        const workerRef = useRef(null);
-        const timeoutRef = useRef(null);
-        const queueRef = useRef(Promise.resolve());
-        const runCountRef = useRef(0);
-        const pendingResolveRef = useRef(null);
-        const pendingRejectRef = useRef(null);
+  const initWorker = useCallback(() => {
+    if (workerRef.current) { try { workerRef.current.terminate(); } catch(_) {} workerRef.current = null; }
+    const url = makeWorkerURL();
+    const w = new Worker(url);
+    URL.revokeObjectURL(url);
+    workerRef.current = w;
 
-        const initWorker = useCallback(() => {
-          if (workerRef.current) {
-            try { workerRef.current.terminate(); } catch(_) {}
-            workerRef.current = null;
-          }
-          const url = makeWorkerURL();
-          const w = new Worker(url);
-          URL.revokeObjectURL(url);
-          workerRef.current = w;
-
-          w.onmessage = (e) => {
-            const { type } = e.data || {};
-            if (type === 'ready') {
-              setState(s => ({ ...s, ready:true, loading:false, error:null }));
-            } else if (type === 'result') {
-              clearTimeout(timeoutRef.current);
-              setState(s => ({ ...s, busy:false }));
-              if (pendingResolveRef.current) pendingResolveRef.current(e.data.images);
-              pendingResolveRef.current = null;
-            } else if (type === 'error') {
-              clearTimeout(timeoutRef.current);
-              setState(s => ({ ...s, busy:false, error: e.data.error || '執行錯誤' }));
-              if (pendingRejectRef.current) pendingRejectRef.current(new Error(e.data.error || '執行錯誤'));
-              pendingRejectRef.current = null;
-            }
-          };
-          w.onerror = (err) => {
-            clearTimeout(timeoutRef.current);
-            setState(s => ({ ...s, busy:false, error: String(err.message || err) }));
-            if (pendingRejectRef.current) pendingRejectRef.current(new Error(String(err.message || err)));
-            pendingRejectRef.current = null;
-          };
-
-          w.postMessage({ type:'init' });
-          setState({ ready:false, loading:true, error:null, busy:false });
-        }, []);
-
-        useEffect(() => {
-          initWorker();
-          return () => { if (workerRef.current) workerRef.current.terminate(); };
-        }, [initWorker]);
-
-        const TIMEOUT_MS = 12000;
-
-        const run = useCallback(async (code) => {
-          const task = () => new Promise((resolve, reject) => {
-            if (!workerRef.current) return reject(new Error("Python 引擎不存在"));
-            pendingResolveRef.current = resolve;
-            pendingRejectRef.current = reject;
-            setState(s => ({ ...s, busy:true, error:null }));
-            workerRef.current.postMessage({ type:'run', code });
-            clearTimeout(timeoutRef.current);
-            timeoutRef.current = setTimeout(() => {
-              try { workerRef.current.terminate(); } catch(_) {}
-              workerRef.current = null;
-              setState(s => ({ ...s, busy:false, ready:false, error: "執行逾時，已重啟 Python 引擎" }));
-              initWorker();
-              reject(new Error("執行逾時，已重啟 Python 引擎"));
-            }, TIMEOUT_MS);
-          });
-
-          const p = queueRef.current.then(task);
-          queueRef.current = p.catch(() => {});
-          const images = await p;
-
-          runCountRef.current = (runCountRef.current + 1) % 5;
-          if (runCountRef.current === 0) {
-            try { workerRef.current.terminate(); } catch(_) {}
-            workerRef.current = null;
-            initWorker();
-          }
-          return images;
-        }, [initWorker]);
-
-        const ctx = useMemo(() => ({ ...state, run }), [state, run]);
-        return <PyContext.Provider value={ctx}>{children}</PyContext.Provider>;
+    w.onmessage = (e) => {
+      const { type } = e.data || {};
+      if (type === 'ready') {
+        setState(s => ({ ...s, ready:true, loading:false, error:null }));
+      } else if (type === 'result') {
+        clearTimeout(timeoutRef.current);
+        setState(s => ({ ...s, busy:false }));
+        pendingResolveRef.current?.(e.data.images);
+        pendingResolveRef.current = null;
+      } else if (type === 'error') {
+        clearTimeout(timeoutRef.current);
+        setState(s => ({ ...s, busy:false, error: e.data.error || '執行錯誤' }));
+        pendingRejectRef.current?.(new Error(e.data.error || '執行錯誤'));
+        pendingRejectRef.current = null;
       }
+    };
+    w.onerror = (err) => {
+      clearTimeout(timeoutRef.current);
+      setState(s => ({ ...s, busy:false, error: String(err.message || err) }));
+      pendingRejectRef.current?.(new Error(String(err.message || err)));
+      pendingRejectRef.current = null;
+    };
 
+    // 啟動
+    w.postMessage({ type:'init' });
+    setState({ ready:false, loading:true, error:null, busy:false });
+  }, []);
+
+  useEffect(() => {
+    initWorker();
+    return () => { if (workerRef.current) workerRef.current.terminate(); };
+  }, [initWorker]);
+
+  const TIMEOUT_MS = 12000;
+
+  const run = useCallback(async (code) => {
+    const task = () => new Promise((resolve, reject) => {
+      if (!workerRef.current) return reject(new Error("Python 引擎不存在"));
+      pendingResolveRef.current = resolve;
+      pendingRejectRef.current = reject;
+      setState(s => ({ ...s, busy:true, error:null }));
+      workerRef.current.postMessage({ type:'run', code });
+
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = setTimeout(() => {
+        try { workerRef.current?.terminate(); } catch(_) {}
+        workerRef.current = null;
+        setState(s => ({ ...s, busy:false, ready:false, error:"執行逾時，已重啟 Python 引擎" }));
+        initWorker();
+        reject(new Error("執行逾時，已重啟 Python 引擎"));
+      }, TIMEOUT_MS);
+    });
+
+    const p = queueRef.current.then(task);
+    queueRef.current = p.catch(() => {});
+    const images = await p;
+
+    // 定期重啟，避免長時間使用堆積
+    runCountRef.current = (runCountRef.current + 1) % 5;
+    if (runCountRef.current === 0) { try { workerRef.current?.terminate(); } catch(_) {} workerRef.current = null; initWorker(); }
+    return images;
+  }, [initWorker]);
+
+  const restart = useCallback(() => { initWorker(); }, [initWorker]);
+
+  const ctx = useMemo(() => ({ ...state, run, restart: initWorker }), [state, run, initWorker]);
+  return <PyContext.Provider value={ctx}>{children}</PyContext.Provider>;
+}
+
+function PythonStatus() {
+  const { ready, loading, busy, error, restart } = useContext(PyContext);
+
+  let cls = "px-2 py-1 rounded-lg border text-xs flex items-center gap-2";
+  let badge = "bg-zinc-800 border-zinc-700";
+  let text = "未就緒";
+  if (loading) { badge = "bg-amber-900/40 border-amber-600 animate-pulse"; text = "準備中"; }
+  else if (error) { badge = "bg-rose-900/40 border-rose-600"; text = "錯誤"; }
+  else if (busy) { badge = "bg-sky-900/40 border-sky-600"; text = "執行中"; }
+  else if (ready) { badge = "bg-emerald-900/40 border-emerald-600"; text = "就緒"; }
+
+  return (
+    <div className={`${cls} ${badge}`} title={error || (ready ? "Python 引擎已就緒" : "Python 引擎尚未就緒")}>
+      <span className="font-mono tracking-wide">PYTHON</span>
+      <span className="opacity-80">{text}</span>
+      {error && (
+        <button
+          onClick={restart}
+          className="ml-1 px-2 py-0.5 rounded bg-zinc-700 hover:bg-zinc-600"
+          title="重啟 Python 引擎"
+        >重試</button>
+      )}
+    </div>
+  );
+}
+
+      
       /* ========= UI 元件 ========= */
       function Dropdown({ label, items }) {
         const [open, setOpen] = useState(false);
@@ -383,7 +645,7 @@ def _run_matplotlib_user_code(code: str):
           <div className="relative" ref={ref}>
             <button className="px-3 py-2 rounded-xl hover:bg-zinc-800/60 transition border border-zinc-700" onClick={() => setOpen(v => !v)}>{label}</button>
             {open && (
-              <div className="absolute mt-2 min-w-56 rounded-xl border border-zinc-700 bg-zinc-900/95 backdrop-blur p-2 shadow-2xl z-50" onClick={()=>setOpen(false)}>
+              <div className="absolute mt-2 w-56 rounded-xl border border-zinc-700 bg-zinc-900/95 backdrop-blur p-2 shadow-2xl z-50" onClick={()=>setOpen(false)}>
                 {items}
               </div>
             )}
@@ -807,7 +1069,8 @@ plt.show()` },
         return (
           <header className="sticky top-0 z-40 border-b border-zinc-800 backdrop-blur bg-zinc-950/80">
             <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
-              <div className="flex items-center gap-2 font-semibold text-lg"><span className="inline-block size-2 rounded-full bg-emerald-400" />Matplotlib 懶人包</div>
+              <div className="flex items-center gap-2 font-semibold text-lg"><span className="inline-block w-2 h-2 rounded-full bg-emerald-400" />Matplotlib 懶人包</div>
+   <PythonStatus />
               <div className="ml-auto flex items-center gap-2">
                 <button className={`px-3 py-2 rounded-xl hover:bg-zinc-800/60 transition ${section==="home"?"border border-zinc-700 bg-zinc-800/40":""}`} onClick={() => { setSection("home"); }}>首頁</button>
                 <Dropdown label="用途" items={
@@ -835,7 +1098,7 @@ plt.show()` },
             <div className="grid md:grid-cols-2 gap-6 items-center">
               <div className="space-y-4">
                 <h1 className="text-3xl font-semibold leading-tight">Matplotlib 懶人包</h1>
-                <p className="text-zinc-300">互動式教學與查詢：在瀏覽器直接執行範例、支援每行註解、單一執行與自動清除輸出。</p>
+                <p className="text-zinc-300">互動式教學與查詢：在瀏覽器直接執行範例、支援每行註解</p>
                 <div className="flex flex-wrap gap-3">
                   <button className="px-4 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500 hover:bg-emerald-500/30" onClick={() => setSection("uses")}>由用途開始</button>
                   <button className="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700" onClick={() => setSection("demos")}>看演示</button>
